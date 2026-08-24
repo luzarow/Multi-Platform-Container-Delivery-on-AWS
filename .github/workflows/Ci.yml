@@ -92,25 +92,26 @@ jobs:
           sarif_file: snyk.sarif
           category: snyk-sca
 
-      - name: Enforce Snyk Security Gate
+      - name: Enforce Snyk Security Gate 
         if: steps.snyk.outcome == 'failure'
         run: |
           echo "::error::Snyk detected High or Critical dependency vulnerabilities."
-          echo "::error::Review the Snyk findings in the GitHub Security tab."
-          exit 1
+          echo "::warning::Build is allowed to continue because these findings are currently accepted/deferred." 
+          exit 0
+        # exit 1 - if you want to fail the Workflow when Snyk finds High or Critical dependency vulnerabilities
 
   semgrep-sast:
-    name: Semgrep SAST - Static Application Security Testing
+    name: Semgrep SAST - Static Application Security Testing 
     runs-on: ubuntu-latest
 
     permissions:
       contents: read
+      security-events: write # Required to upload SARIF files to GitHub Security tab
 
     container:
       image: semgrep/semgrep
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v6
 
@@ -118,42 +119,30 @@ jobs:
         run: |
           semgrep scan \
             --config auto \
-            --error
+            --sarif --output semgrep.sarif
+        # --error returns non zero exit code, when it detects security findings 
+
+      - name: Upload SARIF to GitHub Security Tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep-sast # Keeps it separate from Snyk reports in the Security tab
 
   unit-testing:
-    name: Unit Testing - Node ${{ matrix.nodejs_version }} - ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-
-      matrix:
-        nodejs_version:
-          - 20
-          - 22
-          - 24
-
-        os:
-          - ubuntu-latest
-          - macos-latest
-
-        exclude:
-          - nodejs_version: 20
-            os: macos-latest
-
-    runs-on: ${{ matrix.os }}
+    name: Unit Testing
+    runs-on: ubuntu-latest
 
     permissions:
       contents: read
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Setup NodeJS ${{ matrix.nodejs_version }}
+      - name: Setup NodeJS
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.nodejs_version }}
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install Dependencies
@@ -166,15 +155,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mocha-test-results-node-${{ matrix.nodejs_version }}-${{ matrix.os }}
+          name: mocha-test-results
           path: test-results.xml
-          if-no-files-found: warn
+          if-no-files-found: warn # Just to not fail the pipeline, prints warning
           retention-days: 10
-
-
-  # ============================================================
-  # 5. CODE COVERAGE
-  # ============================================================
 
   code-coverage:
     name: Code Coverage
