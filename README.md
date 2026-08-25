@@ -44,6 +44,17 @@ If the installation was successful, you should be able to run the following comm
 ## Run Application
     $ npm start
 
+## Build container 
+    $ docker build -t image-name . 
+
+## Run the container locally    
+    $ docker run -d --name solar-container -p 3000:3000 --env-file .env image-name
+
+## For ECS Deployment
+    For ECS, provide environment variables either directly in the Task Definition or securely through AWS Secrets Manager.
+
 ## Access Application on Browser
     http://localhost:3000/
+
+
 
