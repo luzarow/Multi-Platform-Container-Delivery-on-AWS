@@ -24,11 +24,9 @@ concurrency:
 env:
   NODE_VERSION: '20'
 
-  
   MONGO_URI: ${{ vars.MONGO_URI }}
   MONGO_USERNAME: ${{ vars.MONGO_USERNAME }}
   MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
-
 
 jobs:
 
@@ -96,6 +94,7 @@ jobs:
         if: steps.snyk.outcome == 'failure'
         run: |
           echo "::error::Snyk detected High or Critical dependency vulnerabilities."
+          echo "::error::Review the Snyk findings in the GitHub Security tab."
           echo "::warning::Build is allowed to continue because these findings are currently accepted/deferred." 
           exit 0
         # exit 1 - if you want to fail the Workflow when Snyk finds High or Critical dependency vulnerabilities

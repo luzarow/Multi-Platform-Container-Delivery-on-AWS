@@ -1,0 +1,347 @@
+name: Solar System DevSecOps CI
+
+run-name: Solar System CI - ${{ github.event_name }} - ${{ github.ref_name }} # Shows Event name (pull or push) & Branch name that triggerd the Workflow
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+      - 'feature/**'
+
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: solar-system
+  IMAGE_NAME: solar-system
+
+jobs:
+
+  gitleaks-scan:
+    name: Gitleaks Secret Scan
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks Scan
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  snyk-sca:
+    name: Snyk SCA - Dependency Security
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Snyk Dependency Scan
+        id: snyk
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          command: test
+          args: >-
+            --severity-threshold=high
+            --sarif-file-output=snyk.sarif
+
+      - name: Upload Snyk SARIF Report to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: snyk.sarif
+          category: snyk-sca
+
+      - name: Enforce Snyk Security Gate 
+        if: steps.snyk.outcome == 'failure'
+        run: |
+          echo "::error::Snyk detected High or Critical dependency vulnerabilities."
+          echo "::error::Review the Snyk findings in the GitHub Security tab."
+          echo "::warning::Build is allowed to continue because these findings are currently accepted/deferred." 
+        # exit 1 - if you want to fail the Workflow when Snyk finds High or Critical dependency vulnerabilities
+
+  semgrep-sast:
+    name: Semgrep SAST
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      security-events: write
+
+    container:
+      image: semgrep/semgrep
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --config auto \
+            --sarif \
+            --output semgrep.sarif
+         # --error returns non zero exit code, when it detects security findings 
+
+      - name: Upload SARIF Report to GitHub Security Tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep-sast
+
+  unit-testing:
+    name: Unit Testing
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    env:
+      MONGO_URI: ${{ vars.MONGO_URI }}
+      MONGO_USERNAME: ${{ vars.MONGO_USERNAME }}
+      MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+    
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Unit Tests
+        run: npm test
+
+      - name: Archive Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: test-results.xml
+          if-no-files-found: warn
+          retention-days: 10
+
+  code-coverage:
+    name: Code Coverage
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    env:
+      MONGO_URI: ${{ vars.MONGO_URI }}
+      MONGO_USERNAME: ${{ vars.MONGO_USERNAME }}
+      MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Coverage
+        run: npm run coverage
+
+      - name: Archive Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-coverage-${{ github.sha }}
+          path: coverage
+          if-no-files-found: warn # Just to not fail the pipeline if no files found, prints warning
+          retention-days: 10
+
+  # - - - IMAGE BUILD + SECURITY + PUBLISH - - -
+  
+  image-build-scan-publish:
+    name: Docker Build, Trivy Scan & ECR Publish
+    runs-on: ubuntu-24.04
+
+    needs:
+      - gitleaks-scan
+      - snyk-sca
+      - semgrep-sast
+      - unit-testing
+      - code-coverage
+
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.4.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Scan Docker Image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+      - name: Generate Container SBOM
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          image: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload Container SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-sbom-${{ github.sha }}
+          path: sbom.spdx.json
+          retention-days: 30
+
+
+      # --------------------------------------------------------
+      # AWS OIDC Authentication
+      # --------------------------------------------------------
+      #
+      # Only main is allowed to access AWS.
+      #
+      - name: Configure AWS Credentials
+        if: >
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+
+      # --------------------------------------------------------
+      # Amazon ECR Login
+      # --------------------------------------------------------
+      - name: Login to Amazon ECR
+        if: >
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main'
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+
+      # --------------------------------------------------------
+      # Tag EXACTLY the image Trivy scanned
+      # --------------------------------------------------------
+      - name: Tag Scanned Image
+        if: >
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main'
+        run: |
+          docker tag \
+            "${IMAGE_NAME}:${GITHUB_SHA}" \
+            "${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+
+          docker tag \
+            "${IMAGE_NAME}:${GITHUB_SHA}" \
+            "${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:latest"
+
+
+      # --------------------------------------------------------
+      # Push SHA-tagged immutable image
+      # --------------------------------------------------------
+      - name: Push Immutable Image
+        if: >
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main'
+        run: |
+          docker push \
+            "${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+
+
+      # --------------------------------------------------------
+      # Push latest convenience tag
+      # --------------------------------------------------------
+      - name: Push Latest Image
+        if: >
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main'
+        run: |
+          docker push \
+            "${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:latest"
+
+
+      # --------------------------------------------------------
+      # Show published image
+      # --------------------------------------------------------
+      - name: Print Published Image
+        if: >
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main'
+        run: |
+          echo "Published image:"
+          echo "${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA}"
