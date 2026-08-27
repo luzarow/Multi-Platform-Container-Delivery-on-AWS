@@ -266,34 +266,8 @@ jobs:
           retention-days: 30
 
 
-      # --------------------------------------------------------
-      # AWS OIDC Authentication
-      # --------------------------------------------------------
-      #
-      # Only main is allowed to access AWS.
-      #
+      # - - - AWS OIDC Authentication - - -
 
-
-      - name: Check GitHub OIDC token
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const token = await core.getIDToken('sts.amazonaws.com');
-            const payload = JSON.parse(
-              Buffer.from(token.split('.')[1], 'base64url').toString()
-            );
-
-            console.log('OIDC claims:');
-            console.log(JSON.stringify({
-              iss: payload.iss,
-              aud: payload.aud,
-              sub: payload.sub,
-              repository: payload.repository,
-              ref: payload.ref,
-              event_name: payload.event_name
-            }, null, 2));
-
-            
 
       - name: Configure AWS Credentials
         if: >
@@ -306,9 +280,6 @@ jobs:
           role-session-name: GitHubActions-${{ github.run_id }}
 
 
-      # --------------------------------------------------------
-      # Amazon ECR Login
-      # --------------------------------------------------------
       - name: Login to Amazon ECR
         if: >
           github.event_name == 'push' &&
@@ -317,9 +288,6 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
 
-      # --------------------------------------------------------
-      # Tag EXACTLY the image Trivy scanned
-      # --------------------------------------------------------
       - name: Tag Scanned Image
         if: >
           github.event_name == 'push' &&
@@ -329,15 +297,9 @@ jobs:
             "${IMAGE_NAME}:${GITHUB_SHA}" \
             "${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA}"
 
-          docker tag \
-            "${IMAGE_NAME}:${GITHUB_SHA}" \
-            "${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:latest"
 
 
-      # --------------------------------------------------------
-      # Push SHA-tagged immutable image
-      # --------------------------------------------------------
-      - name: Push Immutable Image
+      - name: Push Image
         if: >
           github.event_name == 'push' &&
           github.ref == 'refs/heads/main'
@@ -346,21 +308,7 @@ jobs:
             "${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA}"
 
 
-      # --------------------------------------------------------
-      # Push latest convenience tag
-      # --------------------------------------------------------
-      - name: Push Latest Image
-        if: >
-          github.event_name == 'push' &&
-          github.ref == 'refs/heads/main'
-        run: |
-          docker push \
-            "${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:latest"
 
-
-      # --------------------------------------------------------
-      # Show published image
-      # --------------------------------------------------------
       - name: Print Published Image
         if: >
           github.event_name == 'push' &&

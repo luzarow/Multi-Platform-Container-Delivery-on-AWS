@@ -56,5 +56,6 @@ If the installation was successful, you should be able to run the following comm
 ## Access Application on Browser
     http://localhost:3000/
 
+Fixed GitHub Actions → AWS OIDC authentication by updating the IAM trust policy to match GitHub’s immutable OIDC sub claim format.
 
 
