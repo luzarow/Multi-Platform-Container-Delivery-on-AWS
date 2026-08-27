@@ -277,7 +277,6 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActions-${{ github.run_id }}
 
 
       - name: Login to Amazon ECR
@@ -296,7 +295,6 @@ jobs:
           docker tag \
             "${IMAGE_NAME}:${GITHUB_SHA}" \
             "${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA}"
-
 
 
       - name: Push Image
