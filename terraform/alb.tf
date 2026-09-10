@@ -19,7 +19,8 @@ resource "aws_lb_target_group" "app" {
   vpc_id = aws_vpc.main.id
 
   health_check {
-    enabled = false
+    enabled = true
+    path    = "/live"
   }
 }
 
