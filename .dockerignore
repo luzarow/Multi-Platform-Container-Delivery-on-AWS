@@ -13,3 +13,6 @@ solar-system.png
 coverage
 test-results.xml
 .env
+.terraform
+terraform
+kubernetes
