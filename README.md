@@ -59,3 +59,43 @@ If the installation was successful, you should be able to run the following comm
 Fixed GitHub Actions → AWS OIDC authentication by updating the IAM trust policy to match GitHub’s immutable OIDC sub claim format. --
 
 
+                         Internet
+                            │
+                            ▼
+                    Application Load
+                       Balancer :80
+                            │
+                            ▼
+                      Target Group
+                            │
+                            ▼
+                     ECS Fargate
+                    ┌───────┴───────┐
+                    │               │
+                  Task 1          Task 2
+                  :3000           :3000
+                    │
+                    └───────┬───────┘
+                            │
+                            ▼
+                    Existing ECR Image
+                    solar-system:<SHA>
+
+                         ECS Task
+                            │
+                            ▼
+                    Secrets Manager
+                 ┌──────────┼──────────┐
+                 │          │          │
+              MONGO_URI  USERNAME   PASSWORD
+
+
+             VPC: 10.0.0.0/16
+             ├── Public Subnet A
+             └── Public Subnet B
+
+             Internet Gateway
+
+1 task ── CPU > 60% ──> 2 tasks
+
+2 tasks ── CPU drops ──> 1 task
