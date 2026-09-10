@@ -36,7 +36,7 @@ resource "aws_iam_role" "github_cd" {
         Effect = "Allow"
 
         Principal = {
-          Federated = data.aws_iam_openid_connect_provider.github.arn
+          Federated = "arn:aws:iam::632752099424:oidc-provider/token.actions.githubusercontent.com"
         }
 
         Action = "sts:AssumeRoleWithWebIdentity"
@@ -106,6 +106,27 @@ resource "aws_iam_role_policy" "github_cd" {
         ]
 
         Resource = aws_iam_role.ecs_execution.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "ecs_secrets" {
+  name = "${local.name}-ecs-secrets-policy"
+  role = aws_iam_role.ecs_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+
+        Resource = aws_secretsmanager_secret.mongodb.arn
       }
     ]
   })
